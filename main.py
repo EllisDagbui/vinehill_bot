@@ -101,16 +101,16 @@ def categorize_file(new_name):
     else:
         return "movies"
 
-def build_deep_link(file_name):
+async def build_deep_link(file_name):
     """
     Construct a deep link URL for a given file.
     URL-encode the file name.
     """
     encoded = urllib.parse.quote(file_name)
-    # Get the bot's username (this assumes the bot is fully authorized)
-    bot_info = await app.get_me()
+    bot_info = await app.get_me()  # ✅ 'await' now inside an async function
     bot_username = bot_info.username
     return f"https://t.me/{bot_username}?start=file={encoded}"
+
 
 async def update_channel(category, channel_id):
     """
@@ -123,7 +123,7 @@ async def update_channel(category, channel_id):
     else:
         lines = [f"Available {category.capitalize()} Files:"]
         for fname in sorted(files_dict.keys()):
-            deep_link = build_deep_link(fname)
+            deep_link = await build_deep_link(fname)
             lines.append(f"[{fname}]({deep_link})")
         text = "\n".join(lines)
     
