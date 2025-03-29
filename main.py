@@ -245,7 +245,8 @@ async def rename_and_forward(client, message):
 # ----------------------------
 # Chatbot Mode: Answer general queries
 # ----------------------------
-@app.on_message(filters.text & ~filters.command())
+# This now filters out messages starting with "/" (i.e., commands)
+@app.on_message(filters.text & ~filters.regex(r"^/"))
 async def chatbot_mode(client, message):
     if "trending" in message.text.lower():
         response = "Trending files: " + ", ".join(sorted(trending_downloads.keys()))
