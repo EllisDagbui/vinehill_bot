@@ -2,6 +2,7 @@ import os
 import re
 import asyncio
 import time
+import urllib.parse
 from pyrogram import Client, filters, enums
 from pyrogram.types import InlineQueryResultArticle, InputTextMessageContent
 
@@ -13,25 +14,49 @@ API_HASH = os.getenv("API_HASH")
 # Initialize the bot
 app = Client("VINEHILL_BOT", bot_token=BOT_TOKEN, api_id=API_ID, api_hash=API_HASH)
 
-# REQUIRED_GROUPS: Replace these with the actual Telegram group IDs your users must join.
-REQUIRED_GROUPS = [-1001234567890, -1009876543210]  # Example IDs; update accordingly
+# -----------------------------
+# Constants: Using your public channel/group usernames
+# -----------------------------
+STORAGE_GROUP_ID = "@VINEHILL_STORAGE"     # VINEHILL_STORAGE group
+CHANNEL_GAMES_ID = "@VINEHILL_GAMES"       # VINEHILL🤡 GAMES🔫
+CHANNEL_MUSIC_ID = "@VINEHILL_MUSIC"       # VINEHILL🤡 MUSIC🔫
+CHANNEL_MOVIES_ID = "@VINEHILL_MOVIES"       # VINEHILL🤡 MOVIES🔫
+CHANNEL_TVSERIES_ID = "@VINEHILL_TVSERIES"   # VINEHILL🤡 TVSERIES🔫
 
-# In-memory stores (for demonstration; these reset on restart)
-trending_downloads = {}   # new_name: download count
-user_favorites = {}       # user_id: [file_name, ...]
-available_files = {}      # new_name: file_path (for deep-link sending)
-# Simulated processing queue
-file_processing_queue = asyncio.Queue()
+# -----------------------------
+# In-memory storage (resets on restart)
+# -----------------------------
+# For each category, store a dictionary of file_name -> file_path
+available_files = {
+    "games": {},
+    "music": {},
+    "movies": {},
+    "tvseries": {}
+}
 
+# To store deep-link update message IDs for each channel
+channel_update_message_ids = {
+    "games": None,
+    "music": None,
+    "movies": None,
+    "tvseries": None
+}
+
+# -----------------------------
+# Helper Functions
+# -----------------------------
 def parse_filename(file_name, chat_title):
     """
     Rename files based on rules:
-    - TV Series: if filename contains SxxExx, format as "<Series Name> SxxExx <Quality> VINEHILL"
-    - Movies: if filename contains a year (e.g., (2010) or [2010]), format as "<Movie Name> (Year) <Quality> VINEHILL"
-    - Games: if chat title indicates games, remove the channel name and append VINEHILL.
-    - Default: append "VINEHILL" to the filename.
+      - TV Series: if filename contains SxxExx, format as: 
+            "<Series Name> SxxExx <Quality> VINEHILL"
+      - Movies: if filename contains a year (e.g., (2010) or [2010]), format as: 
+            "<Movie Name> (Year) <Quality> VINEHILL"
+      - Games: if chat title indicates it's from a game channel (contains "GAMES"),
+            remove that name from the filename.
+      - Otherwise, append "VINEHILL".
     """
-    # Check for TV series pattern (e.g., S01E05)
+    # TV Series pattern check
     tv_match = re.search(r"(S\d{2}E\d{2})", file_name, re.IGNORECASE)
     if tv_match:
         parts = file_name.split(tv_match.group(1))
@@ -41,7 +66,7 @@ def parse_filename(file_name, chat_title):
         new_name = f"{series_name} {tv_match.group(1)} {quality} VINEHILL".strip()
         return new_name
 
-    # Check for movie pattern with a year
+    # Movie pattern: check for a year in parentheses or brackets
     year_match = re.search(r"[\(\[](\d{4})[\)\]]", file_name)
     if year_match:
         parts = re.split(r"[\(\[]\d{4}[\)\]]", file_name)
@@ -51,46 +76,88 @@ def parse_filename(file_name, chat_title):
         new_name = f"{movie_name} ({year_match.group(1)}) {quality} VINEHILL".strip()
         return new_name
 
-    # For game files: if the chat title indicates it's from a game channel, remove that part.
+    # For games: if the chat title suggests it's from a game channel, remove that part.
     if chat_title and "GAMES" in chat_title.upper():
         new_name = file_name.replace("VINEHILL GAMES", "").strip()
         return f"{new_name} VINEHILL".strip()
 
-    # Default behavior: append VINEHILL to the filename.
+    # Default behavior:
     return f"{file_name} VINEHILL".strip()
 
-async def check_membership(user_id):
-    """Check if the user is a member of all required groups."""
-    for group_id in REQUIRED_GROUPS:
-        try:
-            member = await app.get_chat_member(group_id, user_id)
-            if member.status in [enums.ChatMemberStatus.LEFT, enums.ChatMemberStatus.KICKED]:
-                return False
-        except Exception:
-            return False
-    return True
+def categorize_file(new_name):
+    """
+    Simple categorization based on keywords in the file name.
+    Adjust these rules as needed.
+    """
+    lower = new_name.lower()
+    if any(kw in lower for kw in ["s0", "season", "episode", "e0"]):
+        return "tvseries"
+    elif any(kw in lower for kw in ["movie", "1080p", "720p", "dvdrip"]):
+        return "movies"
+    elif any(kw in lower for kw in ["game", "apk", "xbox", "ps", "pc"]):
+        return "games"
+    elif any(kw in lower for kw in ["music", "mp3", "flac", "album"]):
+        return "music"
+    else:
+        return "movies"
 
-# ----------------------------
+def build_deep_link(file_name):
+    """
+    Construct a deep link URL for a given file.
+    URL-encode the file name.
+    """
+    encoded = urllib.parse.quote(file_name)
+    # Get the bot's username (this assumes the bot is fully authorized)
+    bot_username = app.get_me().username
+    return f"https://t.me/{bot_username}?start=file={encoded}"
+
+async def update_channel(category, channel_id):
+    """
+    Update the channel message for a given category with the list of available files.
+    If a message was sent before, edit it; otherwise, send a new one.
+    """
+    files_dict = available_files.get(category, {})
+    if not files_dict:
+        text = f"No {category.capitalize()} files available yet."
+    else:
+        lines = [f"Available {category.capitalize()} Files:"]
+        for fname in sorted(files_dict.keys()):
+            deep_link = build_deep_link(fname)
+            lines.append(f"[{fname}]({deep_link})")
+        text = "\n".join(lines)
+    
+    # Check if we already have a message ID to edit
+    msg_id = channel_update_message_ids.get(category)
+    try:
+        if msg_id:
+            msg = await app.edit_message_text(chat_id=channel_id, message_id=msg_id, text=text, parse_mode="markdown")
+        else:
+            msg = await app.send_message(chat_id=channel_id, text=text, parse_mode="markdown")
+            channel_update_message_ids[category] = msg.message_id
+    except Exception as e:
+        print(f"Error updating channel {category}: {e}")
+
+async def update_all_channels():
+    """Update all channels with the latest file lists."""
+    await update_channel("games", CHANNEL_GAMES_ID)
+    await update_channel("music", CHANNEL_MUSIC_ID)
+    await update_channel("movies", CHANNEL_MOVIES_ID)
+    await update_channel("tvseries", CHANNEL_TVSERIES_ID)
+
+# -----------------------------
 # Command Handlers
-# ----------------------------
-
+# -----------------------------
 @app.on_message(filters.command("start"))
 async def start_handler(client, message):
-    # Check if there's a deep link parameter
+    # Deep-link handling for file requests
     if len(message.command) > 1 and message.command[1].startswith("file="):
         file_req = message.command[1].split("=", 1)[1]
-        # Before sending the file, verify membership
-        if not await check_membership(message.from_user.id):
-            await message.reply_text("Please join all VINEHILL groups to access files.")
-            return
-        # If the file exists, send it
-        if file_req in available_files:
-            file_path = available_files[file_req]
-            # Update trending downloads
-            trending_downloads[file_req] = trending_downloads.get(file_req, 0) + 1
-            await message.reply_document(file_path, caption=f"Here is your file: {file_req}")
-        else:
-            await message.reply_text("Requested file not found.")
+        for category, files in available_files.items():
+            if file_req in files:
+                file_path = files[file_req]
+                await message.reply_document(file_path, caption=f"Here is your file: {file_req}")
+                return
+        await message.reply_text("Requested file not found.")
     else:
         await message.reply_text("Hello! VINEHILL_BOT is up and running. Use /help to see commands.")
 
@@ -101,79 +168,29 @@ async def help_handler(client, message):
         "/start - Start the bot or request a file via deep link\n"
         "/help - Show this help message\n"
         "/search <query> - Search for available files\n"
-        "/trending - List trending files\n"
-        "/favorites - List your favorite files\n"
-        "/setfavorite <file_name> - Mark a file as favorite\n"
-        "/request <file_name> - Request a missing file\n"
-        "/preview - Show auto-generated preview\n"
+        "/trending - List trending files (not implemented in this demo)\n"
+        "/favorites - List your favorite files (not implemented in this demo)\n"
+        "/setfavorite <file_name> - Mark a file as favorite (not implemented in this demo)\n"
+        "/request <file_name> - Request a missing file (not implemented in this demo)\n"
+        "/preview - Show auto-generated preview (not implemented in this demo)\n"
     )
     await message.reply_text(help_text)
 
-@app.on_message(filters.command("search"))
-async def search_handler(client, message):
-    query = " ".join(message.command[1:]).lower()
-    if not available_files:
-        await message.reply_text("No files available yet.")
-        return
-    results = [name for name in available_files if query in name.lower()]
-    if results:
-        response = "Search Results:\n" + "\n".join(results)
-    else:
-        response = "No matching files found."
-    await message.reply_text(response)
-
-@app.on_message(filters.command("trending"))
-async def trending_handler(client, message):
-    if not trending_downloads:
-        await message.reply_text("No trending files yet.")
-        return
-    sorted_trending = sorted(trending_downloads.items(), key=lambda x: x[1], reverse=True)
-    response = "Trending Files:\n" + "\n".join(f"{name} - {count} downloads" for name, count in sorted_trending)
-    await message.reply_text(response)
-
-@app.on_message(filters.command("favorites"))
-async def favorites_handler(client, message):
-    user_id = message.from_user.id
-    favs = user_favorites.get(user_id, [])
-    if favs:
-        response = "Your Favorites:\n" + "\n".join(favs)
-    else:
-        response = "You have no favorites set."
-    await message.reply_text(response)
-
-@app.on_message(filters.command("setfavorite"))
-async def setfavorite_handler(client, message):
-    user_id = message.from_user.id
-    if len(message.command) < 2:
-        await message.reply_text("Usage: /setfavorite <file_name>")
-        return
-    file_name = " ".join(message.command[1:])
-    user_favorites.setdefault(user_id, []).append(file_name)
-    await message.reply_text(f"Added '{file_name}' to your favorites.")
-
-@app.on_message(filters.command("request"))
-async def request_handler(client, message):
-    user_id = message.from_user.id
-    if not await check_membership(user_id):
-        await message.reply_text("Please join all VINEHILL groups to request files.")
-        return
-    if len(message.command) < 2:
-        await message.reply_text("Usage: /request <file_name>")
-        return
-    file_name = " ".join(message.command[1:])
-    # Simulate handling a custom file request
-    await message.reply_text(f"Your request for '{file_name}' has been noted. We'll notify you if it becomes available.")
-
-@app.on_message(filters.command("preview"))
-async def preview_handler(client, message):
-    # Simulate an auto-generated preview
-    await message.reply_text("Auto-generated preview:\n[Cover Image Placeholder]\nDescription: Sample file description.")
-
-# Inline query handler for searching files in any chat
 @app.on_inline_query()
 async def inline_query_handler(client, inline_query):
     query = inline_query.query.lower()
-    if not available_files:
+    results = []
+    for category, files in available_files.items():
+        for fname in files:
+            if query in fname.lower():
+                deep_link = build_deep_link(fname)
+                results.append(
+                    InlineQueryResultArticle(
+                        title=fname,
+                        input_message_content=InputTextMessageContent(deep_link)
+                    )
+                )
+    if not results:
         results = [
             InlineQueryResultArticle(
                 title="No files available",
@@ -181,79 +198,56 @@ async def inline_query_handler(client, inline_query):
                 input_message_content=InputTextMessageContent("No files available.")
             )
         ]
-    else:
-        matching_files = [name for name in available_files if query in name.lower()]
-        results = []
-        for file in matching_files:
-            results.append(
-                InlineQueryResultArticle(
-                    title=file,
-                    input_message_content=InputTextMessageContent(file)
-                )
-            )
     await inline_query.answer(results, cache_time=1)
 
-# ----------------------------
-# File Processing Handler
-# ----------------------------
-@app.on_message(filters.document | filters.video | filters.audio)
-async def rename_and_forward(client, message):
-    user_id = message.from_user.id
-    # Verify membership before processing
-    if not await check_membership(user_id):
-        await message.reply_text("Please join all VINEHILL groups to access files.")
-        return
-
+# -----------------------------
+# File Processing in Storage Group
+# -----------------------------
+@app.on_message(filters.chat(STORAGE_GROUP_ID) & (filters.document | filters.video | filters.audio))
+async def process_storage_files(client, message):
+    """
+    Process files sent to the VINEHILL_STORAGE group.
+    Downloads the file, renames and categorizes it, then updates the corresponding channel.
+    """
     chat_title = message.chat.title if message.chat and message.chat.title else ""
-    # Determine original file name
     if message.document:
-        file_name = message.document.file_name
+        orig_name = message.document.file_name
     elif message.video:
-        file_name = message.video.file_name
+        orig_name = message.video.file_name
     elif message.audio:
-        file_name = message.audio.file_name
+        orig_name = message.audio.file_name
     else:
-        file_name = "file"
+        orig_name = "file"
 
-    # Generate new file name based on our rules
-    new_name = parse_filename(file_name, chat_title)
-
-    # Start download and estimate speed
+    new_name = parse_filename(orig_name, chat_title)
+    category = categorize_file(new_name)
+    
     start_time = time.time()
     file_path = await message.download()
     download_time = time.time() - start_time
 
-    # Update trending downloads count
-    trending_downloads[new_name] = trending_downloads.get(new_name, 0) + 1
-
-    # Store the file path for deep link requests (in-memory; not persistent)
-    available_files[new_name] = os.path.join(os.path.dirname(file_path), new_name)
-
-    # Simulate queue system for processing large files
-    await file_processing_queue.put(new_name)
-
-    # Rename the file
     new_file_path = os.path.join(os.path.dirname(file_path), new_name)
     os.rename(file_path, new_file_path)
-
-    # Reply with the renamed file and include download speed info
-    await message.reply_document(new_file_path, caption=f"File processed by VINEHILL_BOT in {download_time:.2f} seconds")
     
-    # Remove from processing queue (simulate)
-    await file_processing_queue.get()
+    available_files[category][new_name] = new_file_path
+    print(f"Processed {new_name} in category {category} in {download_time:.2f} seconds.")
 
-# ----------------------------
-# Chatbot Mode: Answer general queries
-# ----------------------------
-# This now filters out messages starting with "/" (i.e., commands)
+    # Update the corresponding channel for this category
+    channel_ids = {
+        "games": CHANNEL_GAMES_ID,
+        "music": CHANNEL_MUSIC_ID,
+        "movies": CHANNEL_MOVIES_ID,
+        "tvseries": CHANNEL_TVSERIES_ID
+    }
+    await update_channel(category, channel_ids[category])
+
+# -----------------------------
+# Chatbot Mode (for non-command texts)
+# -----------------------------
 @app.on_message(filters.text & ~filters.regex(r"^/"))
 async def chatbot_mode(client, message):
-    if "trending" in message.text.lower():
-        response = "Trending files: " + ", ".join(sorted(trending_downloads.keys()))
-    else:
-        response = "I'm VINEHILL_BOT, here to help with your files. Use /help for commands."
+    response = "I'm VINEHILL_BOT, here to help with your files. Use /help for commands."
     await message.reply_text(response)
 
-print("Starting VINEHILL_BOT with advanced features...")
-print("Running the bot...")
+print("Starting VINEHILL_BOT with storage monitoring and channel updates...")
 app.run()
