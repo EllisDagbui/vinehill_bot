@@ -23,7 +23,14 @@ try:
 except (TypeError, ValueError):
     raise ValueError("Invalid or missing API_ID in .env")
 API_HASH = os.getenv("API_HASH")
-STORAGE_GROUP_ID = int(os.getenv("STORAGE_GROUP_ID", "0"))
+raw_storage_id = os.getenv("STORAGE_GROUP_ID")
+print(f"Raw STORAGE_GROUP_ID: {repr(raw_storage_id)}")  # Debugging output
+
+try:
+    STORAGE_GROUP_ID = int(raw_storage_id)
+except (TypeError, ValueError):
+    raise ValueError(f"Invalid STORAGE_GROUP_ID: {repr(raw_storage_id)}")
+
 
 if not BOT_TOKEN or not API_ID or not API_HASH or STORAGE_GROUP_ID == 0:
     raise ValueError("Missing required environment variables.")
