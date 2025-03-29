@@ -174,6 +174,8 @@ async def inline_query_handler(client, inline_query):
 
 @app.on_message(filters.chat(STORAGE_GROUP_ID) & (filters.document | filters.video | filters.audio))
 async def process_storage_files(client, message):
+    print("File processing handler triggered")
+    # rest of your code...
     """
     Processes files sent to VINEHILL_STORAGE:
       - Retrieves the original file name.
