@@ -108,7 +108,8 @@ def build_deep_link(file_name):
     """
     encoded = urllib.parse.quote(file_name)
     # Get the bot's username (this assumes the bot is fully authorized)
-    bot_username = app.get_me().username
+    bot_info = await app.get_me()
+    bot_username = bot_info.username
     return f"https://t.me/{bot_username}?start=file={encoded}"
 
 async def update_channel(category, channel_id):
