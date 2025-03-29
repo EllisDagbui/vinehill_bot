@@ -1,4 +1,4 @@
-import os
+Fimport os
 
 try:
     from dotenv import load_dotenv
@@ -24,7 +24,13 @@ except (TypeError, ValueError):
     raise ValueError("Invalid or missing API_ID in .env")
 
 API_HASH = os.getenv("API_HASH")
-STORAGE_GROUP_ID = int(os.getenv("STORAGE_GROUP_ID", "0"))
+STORAGE_GROUP_ID = os.getenv("STORAGE_GROUP_ID", "0").strip().replace("\u200e", "")
+
+try:
+    STORAGE_GROUP_ID = int(STORAGE_GROUP_ID)
+except ValueError:
+    raise ValueError(f"Invalid STORAGE_GROUP_ID: {STORAGE_GROUP_ID}")
+
 
 if not BOT_TOKEN or not API_ID or not API_HASH or STORAGE_GROUP_ID == 0:
     raise ValueError("Missing required environment variables.")
