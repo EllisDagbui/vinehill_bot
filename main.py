@@ -9,6 +9,29 @@ except ModuleNotFoundError:
 
 # Load environment variables from .env file (only once)
 load_dotenv()
+# Environment Variables
+BOT_TOKEN = os.getenv("BOT_TOKEN")
+try:
+    API_ID = int(os.getenv("API_ID", "0"))
+except (TypeError, ValueError):
+    raise ValueError("Invalid or missing API_ID in .env")
+API_HASH = os.getenv("API_HASH")
+
+# Debug and clean STORAGE_GROUP_ID
+raw_storage_id = os.getenv("STORAGE_GROUP_ID", "").strip()
+cleaned_id = raw_storage_id.encode("ascii", "ignore").decode().strip()
+if cleaned_id.startswith("="):
+    cleaned_id = cleaned_id[1:].strip()
+print(f"Cleaned STORAGE_GROUP_ID: {repr(cleaned_id)}")  # Debug output
+
+try:
+    STORAGE_GROUP_ID = int(cleaned_id)
+except (TypeError, ValueError):
+    raise ValueError(f"Invalid STORAGE_GROUP_ID: {repr(cleaned_id)}")
+
+if not BOT_TOKEN or not API_ID or not API_HASH or STORAGE_GROUP_ID == 0:
+    raise ValueError("Missing required environment variables.")
+
 
 import re
 import asyncio
