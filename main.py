@@ -1,4 +1,4 @@
-Fimport os
+import os
 
 try:
     from dotenv import load_dotenv
