@@ -1,99 +1,110 @@
 import os
 import re
 import asyncio
-import time
 import urllib.parse
+from dotenv import load_dotenv
 from pyrogram import Client, filters
 from pyrogram.types import InlineQueryResultArticle, InputTextMessageContent
 
-# Load environment variables
-BOT_TOKEN = os.getenv("BOT_TOKEN")
-API_ID = os.getenv("API_ID")
-API_HASH = os.getenv("API_HASH")
+# Load environment variables from .env file
+load_dotenv()
 
-if not BOT_TOKEN or not API_ID or not API_HASH:
-    raise ValueError("Missing environment variables: BOT_TOKEN, API_ID, or API_HASH")
+BOT_TOKEN = os.getenv("BOT_TOKEN")
+API_ID = int(os.getenv("API_ID", "0"))
+API_HASH = os.getenv("API_HASH")
+STORAGE_GROUP_ID = int(os.getenv("STORAGE_GROUP_ID", "0"))
+
+if not BOT_TOKEN or not API_ID or not API_HASH or STORAGE_GROUP_ID == 0:
+    raise ValueError("Missing required environment variables.")
 
 # Initialize the bot
 app = Client("VINEHILL_BOT", bot_token=BOT_TOKEN, api_id=API_ID, api_hash=API_HASH)
 
 # -----------------------------
-# Constants: Telegram Channel & Group IDs
+# Constants: Telegram Channel & Group IDs (as integers)
 # -----------------------------
-STORAGE_GROUP_ID = "@VINEHILL_STORAGE"
-CHANNEL_GAMES_ID = "@VINEHILL_GAMES"
-CHANNEL_MUSIC_ID = "@VINEHILL_MUSIC"
-CHANNEL_MOVIES_ID = "@VINEHILL_MOVIES"
-CHANNEL_TVSERIES_ID = "@VINEHILL_TVSERIES"
-
-channel_ids = {
-    "games": CHANNEL_GAMES_ID,
-    "music": CHANNEL_MUSIC_ID,
-    "movies": CHANNEL_MOVIES_ID,
-    "tvseries": CHANNEL_TVSERIES_ID
+CHANNEL_IDS = {
+    "games": int(os.getenv("CHANNEL_GAMES_ID", "0")),
+    "music": int(os.getenv("CHANNEL_MUSIC_ID", "0")),
+    "movies": int(os.getenv("CHANNEL_MOVIES_ID", "0")),
+    "tvseries": int(os.getenv("CHANNEL_TVSERIES_ID", "0"))
 }
+# Remove any invalid channel IDs (0)
+CHANNEL_IDS = {k: v for k, v in CHANNEL_IDS.items() if v != 0}
 
 # -----------------------------
 # In-memory Storage
 # -----------------------------
-available_files = {category: {} for category in channel_ids}
-channel_update_message_ids = {category: None for category in channel_ids}
+# Stores available files per category: {category: {file_name: file_id}}
+available_files = {category: {} for category in CHANNEL_IDS}
+# Stores the message ID for the last channel update per category
+channel_update_message_ids = {category: None for category in CHANNEL_IDS}
 
 # -----------------------------
 # Helper Functions
 # -----------------------------
-def parse_filename(file_name, chat_title):
-    """Rename files based on rules for TV Series, Movies, and Games."""
+def parse_filename(file_name):
+    """
+    Rename files based on VINEHILL naming rules and assign a category.
+    Returns (new_name, category)
+    """
+    file_name = file_name.replace("_", " ")
+
+    # TV Series: look for SxxExx pattern
     tv_match = re.search(r"(S\d{2}E\d{2})", file_name, re.IGNORECASE)
     if tv_match:
-        series_name, quality = file_name.split(tv_match.group(1))[0].strip(), ""
-        if quality_match := re.search(r"(\d{3,4}p)", file_name, re.IGNORECASE):
-            quality = quality_match.group(1)
-        return f"{series_name} {tv_match.group(1)} {quality} VINEHILL".strip()
+        series_name = file_name.split(tv_match.group(1))[0].strip()
+        quality = re.search(r"(\d{3,4}p)", file_name, re.IGNORECASE)
+        new_name = f"{series_name} {tv_match.group(1)} {quality.group(1) if quality else ''} VINEHILL".strip()
+        return new_name, "tvseries"
 
-    if year_match := re.search(r"[\(\[](\d{4})[\)\]]", file_name):
-        movie_name, quality = re.split(r"[\(\[]\d{4}[\)\]]", file_name)[0].strip(), ""
-        if quality_match := re.search(r"(\d{3,4}p)", file_name, re.IGNORECASE):
-            quality = quality_match.group(1)
-        return f"{movie_name} ({year_match.group(1)}) {quality} VINEHILL".strip()
+    # Movies: look for a year in parentheses or brackets
+    year_match = re.search(r"[\(\[](\d{4})[\)\]]", file_name)
+    if year_match:
+        movie_name = re.split(r"[\(\[]\d{4}[\)\]]", file_name)[0].strip()
+        quality = re.search(r"(\d{3,4}p)", file_name, re.IGNORECASE)
+        new_name = f"{movie_name} ({year_match.group(1)}) {quality.group(1) if quality else ''} VINEHILL".strip()
+        return new_name, "movies"
 
-    if chat_title and "GAMES" in chat_title.upper():
-        return file_name.replace("VINEHILL GAMES", "").strip() + " VINEHILL"
+    # Games: if file name contains certain keywords
+    if any(kw in file_name.lower() for kw in ["ps", "xbox", "pc", "game"]):
+        return f"{file_name} VINEHILL", "games"
 
-    return f"{file_name} VINEHILL".strip()
-
-def categorize_file(file_name):
-    """Categorizes files based on their name."""
-    lower = file_name.lower()
-    if any(kw in lower for kw in ["s0", "season", "episode", "e0"]):
-        return "tvseries"
-    if any(kw in lower for kw in ["movie", "1080p", "720p", "dvdrip"]):
-        return "movies"
-    if any(kw in lower for kw in ["game", "apk", "xbox", "ps", "pc"]):
-        return "games"
-    if any(kw in lower for kw in ["music", "mp3", "flac", "album"]):
-        return "music"
-    return "movies"
+    # Default: categorize as movie
+    return f"{file_name} VINEHILL".strip(), "movies"
 
 async def build_deep_link(file_name):
-    """Construct a deep link URL for a given file."""
+    """
+    Construct a deep link URL for a given file.
+    The file_name is URL-encoded and appended as a parameter.
+    """
     encoded = urllib.parse.quote(file_name)
     bot_username = (await app.get_me()).username
     return f"https://t.me/{bot_username}?start=file={encoded}"
 
 async def update_channel(category):
-    """Updates a category's channel message with available files."""
-    channel_id = channel_ids[category]
+    """
+    Updates the specified channel's message with a list of available files.
+    Handles flood wait errors and retries.
+    """
+    channel_id = CHANNEL_IDS[category]
     files = available_files.get(category, {})
 
-    text = f"No {category.capitalize()} files available yet." if not files else \
-           "\n".join([f"Available {category.capitalize()} Files:"] + 
-                     [f"[{fname}]({await build_deep_link(fname)})" for fname in sorted(files.keys())])
+    if not files:
+        text = f"No {category.capitalize()} files available yet."
+    else:
+        # Build a markdown list with deep links for each file
+        links = [f"[{fname}]({await build_deep_link(fname)})" for fname in sorted(files.keys())]
+        text = f"Available {category.capitalize()} Files:\n" + "\n".join(links)
 
     try:
         if channel_update_message_ids[category]:
-            await app.edit_message_text(chat_id=channel_id, message_id=channel_update_message_ids[category],
-                                        text=text, parse_mode="MarkdownV2")
+            await app.edit_message_text(
+                chat_id=channel_id,
+                message_id=channel_update_message_ids[category],
+                text=text,
+                parse_mode="MarkdownV2"
+            )
         else:
             msg = await app.send_message(chat_id=channel_id, text=text, parse_mode="MarkdownV2")
             channel_update_message_ids[category] = msg.message_id
@@ -106,8 +117,8 @@ async def update_channel(category):
         print(f"Error updating {category}: {e}")
 
 async def update_all_channels():
-    """Updates all category channels sequentially to avoid rate limits."""
-    for category in channel_ids:
+    """Updates all category channels sequentially with a small delay to avoid rate limits."""
+    for category in CHANNEL_IDS:
         await update_channel(category)
         await asyncio.sleep(2)
 
@@ -116,8 +127,9 @@ async def update_all_channels():
 # -----------------------------
 @app.on_message(filters.command("start"))
 async def start_handler(client, message):
+    # Deep-link file request: /start file=<file_name>
     if len(message.command) > 1 and message.command[1].startswith("file="):
-        file_req = message.command[1].split("=", 1)[1]
+        file_req = urllib.parse.unquote(message.command[1].split("=", 1)[1])
         for category, files in available_files.items():
             if file_req in files:
                 return await message.reply_document(files[file_req], caption=f"Here is your file: {file_req}")
@@ -140,22 +152,29 @@ async def inline_query_handler(client, inline_query):
 
 @app.on_message(filters.chat(STORAGE_GROUP_ID) & (filters.document | filters.video | filters.audio))
 async def process_storage_files(client, message):
-    """Processes files sent to VINEHILL_STORAGE, categorizes and updates channels."""
-    chat_title = message.chat.title if message.chat else ""
-    orig_name = (message.document or message.video or message.audio).file_name if message.document or message.video or message.audio else "unknown_file"
+    """
+    Processes files sent to VINEHILL_STORAGE:
+      - Retrieves the original file name.
+      - Parses the file name to rename and categorize it.
+      - Stores the file ID in in-memory storage.
+      - Updates the corresponding channel with the new file list.
+    """
+    orig_name = (message.document.file_name if message.document else
+                 message.video.file_name if message.video else
+                 message.audio.file_name if message.audio else "unknown_file")
+
+    new_name, category = parse_filename(orig_name)
+    file_id = (message.document.file_id if message.document else
+               message.video.file_id if message.video else
+               message.audio.file_id if message.audio else None)
     
-    new_name, category = parse_filename(orig_name, chat_title), categorize_file(orig_name)
-    file_path, start_time = await message.download(), time.time()
-    
-    new_file_path = os.path.join(os.path.dirname(file_path), new_name)
-    os.rename(file_path, new_file_path)
-    available_files[category][new_name] = new_file_path
-    
-    print(f"Processed {new_name} ({category}) in {time.time() - start_time:.2f}s.")
-    await update_channel(category)
+    if file_id:
+        available_files[category][new_name] = file_id
+        print(f"Processed {new_name} ({category}).")
+        await update_channel(category)
 
 # -----------------------------
 # Start Bot
 # -----------------------------
-print("Starting VINEHILL_BOT with storage monitoring and channel updates...")
+print("Starting VINEHILL_BOT...")
 app.run()
