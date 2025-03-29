@@ -121,6 +121,13 @@ async def update_channel(category, channel_id):
     if not files_dict:
         text = f"No {category.capitalize()} files available yet."
     else:
+        text = "\n".join([f"Available {category.capitalize()} Files:"] + 
+                          [f"[{fname}]({await build_deep_link(fname)})" for fname in sorted(files_dict.keys())])
+
+    files_dict = available_files.get(category, {})
+    if not files_dict:
+        text = f"No {category.capitalize()} files available yet."
+    else:
         lines = [f"Available {category.capitalize()} Files:"]
         for fname in sorted(files_dict.keys()):
             deep_link = await build_deep_link(fname)
@@ -136,14 +143,13 @@ async def update_channel(category, channel_id):
             msg = await app.send_message(chat_id=channel_id, text=text, parse_mode="MarkdownV2")
             channel_update_message_ids[category] = msg.message_id
     except Exception as e:
-    if "FLOOD_WAIT_" in str(e):
-        wait_time = int(re.search(r"FLOOD_WAIT_(\d+)", str(e)).group(1))
-        print(f"[VINEHILL_BOT] Waiting for {wait_time} seconds before retrying...")
-        await asyncio.sleep(wait_time)  # Wait for the required time
-        return await update_channel(category, channel_id)  # Retry after waiting
-    else:
-        print(f"Error updating channel {category}: {e}")
-
+        if "FLOOD_WAIT_" in str(e):
+            wait_time = int(re.search(r"FLOOD_WAIT_(\d+)", str(e)).group(1))
+            print(f"[VINEHILL_BOT] Waiting for {wait_time} seconds before retrying...")
+            await asyncio.sleep(wait_time)  # Wait for the required time
+            return await update_channel(category, channel_id)  # Retry after waiting
+        else:
+            print(f"Error updating channel {category}: {e}")
 
 async def update_all_channels():
     """Update all channels with the latest file lists."""
@@ -191,7 +197,7 @@ async def inline_query_handler(client, inline_query):
     for category, files in available_files.items():
         for fname in files:
             if query in fname.lower():
-                deep_link = build_deep_link(fname)
+                deep_link = await build_deep_link(fname)
                 results.append(
                     InlineQueryResultArticle(
                         title=fname,
