@@ -7,7 +7,7 @@ except ModuleNotFoundError:
     subprocess.run(["pip", "install", "python-dotenv"], check=True)
     from dotenv import load_dotenv
 
-# Load environment variables from .env (only once)
+# Load environment variables from .env file (only once)
 load_dotenv()
 
 import re
@@ -50,23 +50,20 @@ CHANNEL_IDS = {
     "movies": int(os.getenv("CHANNEL_MOVIES_ID", "0")),
     "tvseries": int(os.getenv("CHANNEL_TVSERIES_ID", "0"))
 }
-# Remove invalid channel IDs (0)
 CHANNEL_IDS = {k: v for k, v in CHANNEL_IDS.items() if v != 0}
 
 # -----------------------------
 # In-memory Storage
 # -----------------------------
-# Stores available files per category: {category: {file_name: file_id}}
 available_files = {category: {} for category in CHANNEL_IDS}
-# Stores the message ID for the last channel update per category
 channel_update_message_ids = {category: None for category in CHANNEL_IDS}
 
 # -----------------------------
-# Debug Handler for STORAGE_GROUP_ID (Optional: to verify message receipt)
+# Debug Handler for STORAGE_GROUP_ID (Optional)
 # -----------------------------
 @app.on_message(filters.chat(STORAGE_GROUP_ID))
 async def debug_handler(client, message):
-    print("DEBUG: Message received in storage group:", message)
+    print("DEBUG: Received message in storage group:", message)
 
 # -----------------------------
 # Helper Functions
@@ -186,11 +183,15 @@ async def process_storage_files(client, message):
       - Stores the file ID in in-memory storage.
       - Updates the corresponding channel with the new file list.
     """
+    print("File processing handler triggered.")
     orig_name = (message.document.file_name if message.document else
                  message.video.file_name if message.video else
                  message.audio.file_name if message.audio else "unknown_file")
+    print("Original file name:", orig_name)
     
     new_name, category = parse_filename(orig_name)
+    print("Parsed file name:", new_name, "Category:", category)
+    
     file_id = (message.document.file_id if message.document else
                message.video.file_id if message.video else
                message.audio.file_id if message.audio else None)
@@ -199,6 +200,8 @@ async def process_storage_files(client, message):
         available_files[category][new_name] = file_id
         print(f"Processed {new_name} ({category}).")
         await update_channel(category)
+    else:
+        print("No valid file_id found.")
 
 # -----------------------------
 # Start Bot
