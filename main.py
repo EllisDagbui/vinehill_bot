@@ -9,21 +9,12 @@ API_HASH = os.getenv("API_HASH")
 # Initialize the bot
 app = Client("VINEHILL_BOT", bot_token=BOT_TOKEN, api_id=API_ID, api_hash=API_HASH)
 
-print("Starting VINEHILL_BOT...")  # Log message
+print("Starting VINEHILL_BOT...")
 
-@app.on_message(filters.document | filters.video | filters.audio)
-def rename_and_forward(client, message):
-    # Extract file info
-    file_name = message.document.file_name if message.document else message.video.file_name if message.video else message.audio.file_name
-    new_name = f"VINEHILL_{file_name}"  # Example renaming rule
+# Add a /start command handler to confirm the bot is working
+@app.on_message(filters.command("start"))
+async def start_handler(client, message):
+    await message.reply_text("Hello! VINEHILL_BOT is up and running.")
 
-    # Download and re-upload with new name
-    file_path = message.download()
-    new_file_path = os.path.join(os.path.dirname(file_path), new_name)
-    os.rename(file_path, new_file_path)
-
-    # Forward the renamed file
-    message.reply_document(new_file_path, caption="File processed by VINEHILL_BOT")
-
-print("Running the bot...")  # Log message
+print("Running the bot...")
 app.run()
