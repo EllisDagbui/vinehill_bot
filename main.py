@@ -7,8 +7,8 @@ except ModuleNotFoundError:
     subprocess.run(["pip", "install", "python-dotenv"], check=True)
     from dotenv import load_dotenv  # Try importing again after installation
 
-# Load environment variables from .env file
-load_dotenv()  # ✅ Only call this once
+# Load environment variables from .env file (only once)
+load_dotenv()
 
 import re
 import asyncio
@@ -16,21 +16,14 @@ import urllib.parse
 from pyrogram import Client, filters
 from pyrogram.types import InlineQueryResultArticle, InputTextMessageContent
 
-
+# Environment Variables
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 try:
-    API_ID = int(os.getenv("API_ID"))
+    API_ID = int(os.getenv("API_ID", "0"))
 except (TypeError, ValueError):
     raise ValueError("Invalid or missing API_ID in .env")
-
 API_HASH = os.getenv("API_HASH")
-STORAGE_GROUP_ID = os.getenv("STORAGE_GROUP_ID", "0").strip().replace("\u200e", "")
-
-try:
-    STORAGE_GROUP_ID = int(STORAGE_GROUP_ID)
-except ValueError:
-    raise ValueError(f"Invalid STORAGE_GROUP_ID: {STORAGE_GROUP_ID}")
-
+STORAGE_GROUP_ID = int(os.getenv("STORAGE_GROUP_ID", "0"))
 
 if not BOT_TOKEN or not API_ID or not API_HASH or STORAGE_GROUP_ID == 0:
     raise ValueError("Missing required environment variables.")
