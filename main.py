@@ -131,12 +131,19 @@ async def update_channel(category, channel_id):
     msg_id = channel_update_message_ids.get(category)
     try:
         if msg_id:
-            msg = await app.edit_message_text(chat_id=channel_id, message_id=msg_id, text=text, parse_mode="markdown")
+            msg = await app.edit_message_text(chat_id=channel_id, message_id=msg_id, text=text, parse_mode="MarkdownV2")
         else:
-            msg = await app.send_message(chat_id=channel_id, text=text, parse_mode="markdown")
+            msg = await app.send_message(chat_id=channel_id, text=text, parse_mode="MarkdownV2")
             channel_update_message_ids[category] = msg.message_id
     except Exception as e:
+    if "FLOOD_WAIT_" in str(e):
+        wait_time = int(re.search(r"FLOOD_WAIT_(\d+)", str(e)).group(1))
+        print(f"[VINEHILL_BOT] Waiting for {wait_time} seconds before retrying...")
+        await asyncio.sleep(wait_time)  # Wait for the required time
+        return await update_channel(category, channel_id)  # Retry after waiting
+    else:
         print(f"Error updating channel {category}: {e}")
+
 
 async def update_all_channels():
     """Update all channels with the latest file lists."""
