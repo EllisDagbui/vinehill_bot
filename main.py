@@ -5,9 +5,9 @@ try:
 except ModuleNotFoundError:
     import subprocess
     subprocess.run(["pip", "install", "python-dotenv"], check=True)
-    from dotenv import load_dotenv  # Try importing again after installation
+    from dotenv import load_dotenv
 
-# Load environment variables from .env file (only once)
+# Load environment variables from .env (only once)
 load_dotenv()
 
 import re
@@ -29,8 +29,7 @@ raw_storage_id = os.getenv("STORAGE_GROUP_ID", "").strip()
 cleaned_id = raw_storage_id.encode("ascii", "ignore").decode().strip()
 if cleaned_id.startswith("="):
     cleaned_id = cleaned_id[1:].strip()
-print(f"Cleaned STORAGE_GROUP_ID: {repr(cleaned_id)}")  # Debug output
-
+print(f"Cleaned STORAGE_GROUP_ID: {repr(cleaned_id)}")
 try:
     STORAGE_GROUP_ID = int(cleaned_id)
 except (TypeError, ValueError):
@@ -51,7 +50,7 @@ CHANNEL_IDS = {
     "movies": int(os.getenv("CHANNEL_MOVIES_ID", "0")),
     "tvseries": int(os.getenv("CHANNEL_TVSERIES_ID", "0"))
 }
-# Remove any invalid channel IDs (0)
+# Remove invalid channel IDs (0)
 CHANNEL_IDS = {k: v for k, v in CHANNEL_IDS.items() if v != 0}
 
 # -----------------------------
@@ -63,6 +62,13 @@ available_files = {category: {} for category in CHANNEL_IDS}
 channel_update_message_ids = {category: None for category in CHANNEL_IDS}
 
 # -----------------------------
+# Debug Handler for STORAGE_GROUP_ID (Optional: to verify message receipt)
+# -----------------------------
+@app.on_message(filters.chat(STORAGE_GROUP_ID))
+async def debug_handler(client, message):
+    print("DEBUG: Message received in storage group:", message)
+
+# -----------------------------
 # Helper Functions
 # -----------------------------
 def parse_filename(file_name):
@@ -71,7 +77,7 @@ def parse_filename(file_name):
     Returns (new_name, category)
     """
     file_name = file_name.replace("_", " ")
-
+    
     # TV Series: look for SxxExx pattern
     tv_match = re.search(r"(S\d{2}E\d{2})", file_name, re.IGNORECASE)
     if tv_match:
@@ -79,7 +85,7 @@ def parse_filename(file_name):
         quality = re.search(r"(\d{3,4}p)", file_name, re.IGNORECASE)
         new_name = f"{series_name} {tv_match.group(1)} {quality.group(1) if quality else ''} VINEHILL".strip()
         return new_name, "tvseries"
-
+    
     # Movies: look for a year in parentheses or brackets
     year_match = re.search(r"[\(\[](\d{4})[\)\]]", file_name)
     if year_match:
@@ -87,11 +93,11 @@ def parse_filename(file_name):
         quality = re.search(r"(\d{3,4}p)", file_name, re.IGNORECASE)
         new_name = f"{movie_name} ({year_match.group(1)}) {quality.group(1) if quality else ''} VINEHILL".strip()
         return new_name, "movies"
-
+    
     # Games: if file name contains certain keywords
     if any(kw in file_name.lower() for kw in ["ps", "xbox", "pc", "game"]):
         return f"{file_name} VINEHILL", "games"
-
+    
     # Default: categorize as movie
     return f"{file_name} VINEHILL".strip(), "movies"
 
@@ -111,14 +117,13 @@ async def update_channel(category):
     """
     channel_id = CHANNEL_IDS[category]
     files = available_files.get(category, {})
-
+    
     if not files:
         text = f"No {category.capitalize()} files available yet."
     else:
-        # Build a markdown list with deep links for each file
         links = [f"[{fname}]({await build_deep_link(fname)})" for fname in sorted(files.keys())]
         text = f"Available {category.capitalize()} Files:\n" + "\n".join(links)
-
+    
     try:
         if channel_update_message_ids[category]:
             await app.edit_message_text(
@@ -174,8 +179,6 @@ async def inline_query_handler(client, inline_query):
 
 @app.on_message(filters.chat(STORAGE_GROUP_ID) & (filters.document | filters.video | filters.audio))
 async def process_storage_files(client, message):
-    print("File processing handler triggered")
-    # rest of your code...
     """
     Processes files sent to VINEHILL_STORAGE:
       - Retrieves the original file name.
@@ -186,7 +189,7 @@ async def process_storage_files(client, message):
     orig_name = (message.document.file_name if message.document else
                  message.video.file_name if message.video else
                  message.audio.file_name if message.audio else "unknown_file")
-
+    
     new_name, category = parse_filename(orig_name)
     file_id = (message.document.file_id if message.document else
                message.video.file_id if message.video else
