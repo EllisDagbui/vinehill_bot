@@ -9,6 +9,8 @@ API_HASH = os.getenv("API_HASH")
 # Initialize the bot
 app = Client("VINEHILL_BOT", bot_token=BOT_TOKEN, api_id=API_ID, api_hash=API_HASH)
 
+print("Starting VINEHILL_BOT...")  # Log message
+
 @app.on_message(filters.document | filters.video | filters.audio)
 def rename_and_forward(client, message):
     # Extract file info
@@ -23,4 +25,5 @@ def rename_and_forward(client, message):
     # Forward the renamed file
     message.reply_document(new_file_path, caption="File processed by VINEHILL_BOT")
 
+print("Running the bot...")  # Log message
 app.run()
